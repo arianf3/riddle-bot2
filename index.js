@@ -771,6 +771,11 @@ const server = http.createServer(async (req, res) => {
   // Health / Status Check Endpoint
   if (req.method === 'GET' && (parsedUrl === '/' || parsedUrl === '/health')) {
     const stats = db.getStats();
+    let cfInfo = null;
+    try {
+      const { getDeployResult } = require('./deploy_cf');
+      cfInfo = getDeployResult();
+    } catch (e) {}
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({
       status: 'online',
@@ -778,7 +783,8 @@ const server = http.createServer(async (req, res) => {
       version: '3.0.0',
       totalUsers: stats.totalUsers,
       totalDeals: stats.totalDeals,
-      uptime: `${Math.floor(process.uptime())}s`
+      uptime: `${Math.floor(process.uptime())}s`,
+      cloudflareProxy: cfInfo
     }));
   }
 
@@ -865,6 +871,12 @@ server.listen(PORT, async () => {
 
     // Self-Ping Keep-Alive to prevent Render free-tier sleep
     initKeepAlive(renderUrl);
+
+    // Auto-deploy Cloudflare Telegram Proxy on start
+    try {
+      const { deployCloudflareWorker } = require('./deploy_cf');
+      deployCloudflareWorker().catch(e => console.error('Background CF deploy error:', e.message));
+    } catch (e) {}
   } else {
     console.log('⚡️ No Webhook URL detected; starting long polling mode...');
     startPolling();
