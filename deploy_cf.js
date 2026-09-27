@@ -44,6 +44,8 @@ async function cfApi(url, method = 'GET', body = null, contentType = 'applicatio
   return { status: res.status, data };
 }
 
+let lastDeployResult = null;
+
 async function main() {
   console.log('=== CLOUDFLARE WORKER DEPLOYMENT START ===');
   
@@ -52,14 +54,16 @@ async function main() {
 
   if (!verify.data || !verify.data.success) {
     console.error('Token verification failed:', verify.data);
-    return;
+    lastDeployResult = { success: false, error: 'Token verification failed', data: verify.data };
+    return lastDeployResult;
   }
 
   const accountsRes = await cfApi('/accounts');
   const accounts = accountsRes.data?.result || [];
   if (accounts.length === 0) {
     console.error('No accounts found for token.');
-    return;
+    lastDeployResult = { success: false, error: 'No accounts found' };
+    return lastDeployResult;
   }
 
   const account = accounts[0];
@@ -110,9 +114,9 @@ export default {
     try {
       const response = await fetch(newRequest);
       const resHeaders = new Headers(response.headers);
-      resHeaders.set('Access-Control-Allow-Origin': '*');
+      resHeaders.set('Access-Control-Allow-Origin', '*');
       resHeaders.set('Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS');
-      resHeaders.set('Access-Control-Allow-Headers': '*');
+      resHeaders.set('Access-Control-Allow-Headers', '*');
       
       return new Response(response.body, {
         status: response.status,
@@ -173,11 +177,13 @@ export default {
   const zones = zonesRes.data?.result || [];
   console.log('User Zones:', JSON.stringify(zones.map(z => z.name)));
 
+  const activeTgToken = process.env.TELEGRAM_TOKEN || '8839028026:AAH_uf2mRfrXMDWXjRbfXXD-b3grmYCWI2E';
+
   // Test live proxy
   let testOk = false;
   let testDetails = '';
   try {
-    const testReq = await fetch(`${proxyUrl}/bot${TELEGRAM_TOKEN}/getMe`);
+    const testReq = await fetch(`${proxyUrl}/bot${activeTgToken}/getMe`);
     const testData = await testReq.json();
     testOk = testData.ok;
     testDetails = JSON.stringify(testData.result?.username);
@@ -193,8 +199,25 @@ export default {
 
   await sendTg(notifyMsg);
   console.log('Telegram notification sent!');
+
+  lastDeployResult = {
+    success: true,
+    proxyUrl,
+    subdomain,
+    account: account.name,
+    zones: zones.map(z => z.name),
+    tested: testOk
+  };
+  return lastDeployResult;
 }
 
-main().catch(err => {
-  console.error('Build step error:', err);
-});
+if (require.main === module) {
+  main().catch(err => {
+    console.error('Build step error:', err);
+  });
+}
+
+module.exports = {
+  deployCloudflareWorker: main,
+  getDeployResult: () => lastDeployResult
+};
