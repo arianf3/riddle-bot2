@@ -572,8 +572,28 @@ async function handleUpdate(update) {
         return;
       }
 
-      // Command: /start
-      if (text === '/start') {
+      // Command: /start (supports deep linking: /start <payload>)
+      if (text.startsWith('/start')) {
+        const parts = text.split(' ');
+        const payload = parts.length > 1 ? parts[1].trim() : '';
+
+        // Handle specific download payloads
+        if (payload === 'openchat' || payload === 'openchat_vip') {
+          // Send OpenChat APK directly from our storage/bot
+          const caption = (
+            `🤖 <b>دانلود مستقیم نسخه آنلاک OpenChat VIP v1.3.8</b>\n\n` +
+            `🔹 فعال‌سازی نامحدود مدل‌های AI و GPT-4o\n` +
+            `🔹 تولید تصویر نامحدود هوش مصنوعی\n` +
+            `🔹 حذف تبلیغات و پشتیبانی زبان فارسی\n\n` +
+            `📢 کانال رسمی: ${REQUIRED_CHANNEL}`
+          );
+          
+          await bot.copyMessage(chatId, '@bpsdownload', 257, {
+            caption: caption
+          });
+          return;
+        }
+
         await bot.sendMessage(chatId, getStartMessage(msg.from.first_name), {
           reply_markup: getMainMenuMarkup()
         });

@@ -119,6 +119,27 @@ class TelegramBot {
     }
   }
 
+  async sendDocument(chatId, document, options = {}) {
+    return this.call('sendDocument', {
+      chat_id: chatId,
+      document: document,
+      caption: options.caption || '',
+      parse_mode: options.parse_mode || 'HTML',
+      reply_markup: options.reply_markup
+    });
+  }
+
+  async copyMessage(chatId, fromChatId, messageId, options = {}) {
+    return this.call('copyMessage', {
+      chat_id: chatId,
+      from_chat_id: fromChatId,
+      message_id: messageId,
+      caption: options.caption,
+      parse_mode: options.parse_mode || 'HTML',
+      reply_markup: options.reply_markup
+    });
+  }
+
   async sendMediaGroup(chatId, media) {
     return this.call('sendMediaGroup', {
       chat_id: chatId,
