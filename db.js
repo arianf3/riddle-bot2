@@ -45,6 +45,18 @@ const CATEGORIES = {
 
 const DEFAULT_DEALS = [
   {
+    id: 'deal_fullstack_web_mean',
+    title: 'دوره جامع توسعه وب فول‌استک (استک MEAN در گوگل درایو)',
+    category: 'freebies',
+    badge: '🎓 فولدر کامل گوگل درایو',
+    description: 'پکیج آموزشی جامع فرانت‌اند و بک‌اند شامل HTML5, CSS3, JS, SASS, TypeScript, MongoDB, Node.js و Angular با سورس کامل در Google Drive.',
+    instructions: 'وارد لینک گوگل درایو زیر شوید و به تمام ویدیوها، سورس‌ها و فایل‌های تمرینی به صورت رایگان دسترسی پیدا کنید.',
+    code: '',
+    link: 'https://drive.google.com/drive/folders/1Pcv3XH7XL4TEbMEJqOQLNBK-INsgR5In',
+    date: '2026-09-22',
+    tags: ['web', 'وب', 'فرانت', 'بک', 'javascript', 'جاوااسکریپت', 'node', 'nodejs', 'mongodb', 'angular', 'html', 'css', 'برنامه‌نویسی', 'کامل']
+  },
+  {
     id: 'deal_genspark_ai_unlimited',
     title: 'اکانت نامحدود و رایگان Genspark AI (موتور ریسرچ با Claude 3.5 و GPT-4o)',
     category: 'ai',
