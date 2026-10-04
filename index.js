@@ -8,7 +8,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '8839028026:AAH5Z8721lM8Kj0
 const REQUIRED_CHANNEL = '@rad_protocol';
 const CHANNEL_LINK = 'https://t.me/rad_protocol';
 const SUPPORT_GROUP = 'https://t.me/radprotocoll';
-const WEBAPP_URL = 'https://arianradshan1-cloud.github.io/dumble-player/';
+const WEBAPP_URL = 'https://arianradshan1-cloud.github.io/dumble-player/?v=2.0';
 
 const bot = new TelegramBot(TELEGRAM_TOKEN);
 
