@@ -52,23 +52,27 @@ function getMainMenuMarkup() {
   return {
     inline_keyboard: [
       [
-        { text: '📺 باز کردن تلویزیون دامبل پلیر (Play)', web_app: { url: WEBAPP_URL } }
+        { text: '▶️ ورود به تلویزیون و تماشای آنلاین (Play)', web_app: { url: WEBAPP_URL } }
       ],
       [
-        { text: '🇮🇷 شبکه‌های فارسی', web_app: { url: `${WEBAPP_URL}?url=playlist.m3u` } },
-        { text: '⚽ ورزشی زنده', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/categories/sports.m3u` } }
+        { text: '⚽️ پخش زنده فوتبال', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/categories/sports.m3u` } },
+        { text: '📺 شبکه‌های سراسری', web_app: { url: `${WEBAPP_URL}?url=playlist.m3u` } }
       ],
       [
-        { text: '🎬 فیلم و سینما', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/categories/movies.m3u` } },
-        { text: '🎵 موزیک ویدیو', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/categories/music.m3u` } }
+        { text: '📡 شبکه‌های ماهواره‌ای', web_app: { url: `${WEBAPP_URL}?url=playlist_hd.m3u` } },
+        { text: '🎬 فیلم و سریال', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/categories/movies.m3u` } }
       ],
       [
-        { text: '🌍 شبکه‌های خارجی (US/UK)', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/languages/eng.m3u` } },
-        { text: '🔞 بخش بزرگسالان (+18)', callback_data: 'menu_adult_info' }
+        { text: '🎵 موزیک ۲۴ ساعته', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/categories/music.m3u` } },
+        { text: '🌐 شبکه‌های خارجی (US/UK)', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/languages/eng.m3u` } }
       ],
       [
-        { text: '📢 کانال ما', url: CHANNEL_LINK },
-        { text: '👥 گروه پشتیبانی', url: SUPPORT_GROUP }
+        { text: '🔞 بخش بزرگسالان (+18)', callback_data: 'menu_adult_info' },
+        { text: '📱 راهنمای تماشا و کیفیت', callback_data: 'menu_guide' }
+      ],
+      [
+        { text: '📢 کانال رسمی (@rad_protocol)', url: CHANNEL_LINK },
+        { text: '👥 گروه پشتیبانی و چت', url: SUPPORT_GROUP }
       ]
     ]
   };
@@ -76,17 +80,17 @@ function getMainMenuMarkup() {
 
 function getStartMessage(name) {
   return (
-    `سلام <b>${name || 'دوست من'}</b>! 📺🔥\n` +
-    `به <b>دامبل پلیر (Dumble TV Player)</b> خوش اومدی!\n\n` +
-    `تلویزیون اینترنتی رایگان، بدون تبلیغات و پرسرعت داخل خود تلگرام.\n\n` +
-    `✨ <b>امکانات تلویزیون:</b>\n` +
-    `• 🇮🇷 <b>تمام شبکه‌های سراسری، استانی و ماهواره‌ای فارسی</b> (کیفیت HD/SD)\n` +
-    `• ⚽ <b>شبکه‌های ورزشی جهان (Sports):</b> پخش زنده فوتبال و لیگ‌های اروپایی\n` +
-    `• 🎬 <b>شبکه‌های فیلم، سریال و انیمیشن</b>\n` +
-    `• 🎵 <b>کانال‌های ۲۴ ساعته موزیک ویدیو و کنسرت</b>\n` +
-    `• 🌍 <b>کانال‌های برتر آمریکا، انگلیس و ترکیه</b>\n` +
+    `سلام <b>${name || 'کاربر عزیز'}</b>! 📺✨\n` +
+    `به <b>دامبل پلیر (Dumble TV Player)</b> خوش آمدید.\n\n` +
+    `⚡️ <b>پخش زنده شبکه‌های تلویزیونی کاملاً رایگان، بدون تبلیغات و پرسرعت در تلگرام:</b>\n\n` +
+    `• ⚽️ <b>پخش زنده مسابقات ورزشی و فوتبال اروپا</b>\n` +
+    `• 📺 <b>تمام شبکه‌های سراسری و استانی صداوسیما</b>\n` +
+    `• 📡 <b>شبکه‌های ماهواره‌ای فارسی‌زبان و سرگرمی</b>\n` +
+    `• 🎬 <b>شبکه‌های ۲۴ ساعته فیلم، سریال و انیمیشن</b>\n` +
+    `• 🎵 <b>کانال‌های موزیک ویدیو و کنسرت</b>\n` +
+    `• 🌐 <b>شبکه‌های برتر بین‌المللی (US/UK)</b>\n` +
     `• 🔞 <b>دسترسی رمزدار به بخش +18</b>\n\n` +
-    `👇 <b>برای تماشای آنلاین، روی دکمه زیر کلیک کنید:</b>`
+    `👇 <b>برای شروع تماشا یکی از گزینه‌های زیر را انتخاب کنید:</b>`
   );
 }
 
@@ -133,7 +137,7 @@ async function handleUpdate(update) {
         await bot.answerCallbackQuery(cq.id);
         const adultText = (
           `🔞 <b>بخش محتوای بزرگسالان (+18) دامبل پلیر</b>\n\n` +
-          `این بخش به صورت محافظت‌شده و قفل دار در وب‌اپ قرار دارد.\n` +
+          `این بخش به صورت محافظت‌شده و قفل‌دار در وب‌اپ قرار دارد.\n` +
           `برای دسترسی، پلیر را باز کنید و در منوی انتخاب منابع، گزینه <b>🔞 کانال‌های بزرگسالان (+18)</b> را انتخاب کنید.\n\n` +
           `🔑 <b>رمز ورود به این بخش:</b> <code>18</code>`
         );
@@ -147,6 +151,32 @@ async function handleUpdate(update) {
           await bot.editMessageText(chatId, messageId, adultText, { reply_markup: adultMarkup });
         } else {
           await bot.sendMessage(chatId, adultText, { reply_markup: adultMarkup });
+        }
+        return;
+      }
+
+      if (data === 'menu_guide') {
+        await bot.answerCallbackQuery(cq.id);
+        const guideText = (
+          `📱 <b>راهنمای استفاده و تنظیم کیفیت دامبل پلیر</b>\n\n` +
+          `🔹 <b>پخش روان و بدون لگ:</b>\n` +
+          `• در پلیر روی آیکون ⚙️ بزنید و کیفیت مناسب با سرعت اینترنت خود را انتخاب کنید.\n\n` +
+          `🔹 <b>حالت تمام‌صفحه (Full Screen):</b>\n` +
+          `• گوشی را به صورت افقی بچرخانید و روی علامت ⛶ بزنید.\n\n` +
+          `🔹 <b>جستجوی سریع شبکه:</b>\n` +
+          `• در بالای لیست کانال‌ها، نام شبکه مورد نظر (مثل <i>ورزش</i> یا <i>منوتو</i>) را سرچ کنید.\n\n` +
+          `👇 <b>برای شروع تماشا روی دکمه زیر کلیک کنید:</b>`
+        );
+        const guideMarkup = {
+          inline_keyboard: [
+            [{ text: '📺 ورود به تلویزیون دامبل پلیر', web_app: { url: WEBAPP_URL } }],
+            [{ text: '🔙 بازگشت به منوی اصلی', callback_data: 'menu_main' }]
+          ]
+        };
+        if (messageId) {
+          await bot.editMessageText(chatId, messageId, guideText, { reply_markup: guideMarkup });
+        } else {
+          await bot.sendMessage(chatId, guideText, { reply_markup: guideMarkup });
         }
         return;
       }
