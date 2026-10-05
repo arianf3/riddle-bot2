@@ -236,11 +236,53 @@ async function handleUpdate(update) {
   }
 }
 
-// HTTP Server for Webhook and Keep-Alive
+// Reverse Proxy forwarder for Telegram & AI APIs
+function forwardRequest(req, res, targetUrl) {
+  try {
+    const parsed = new URL(targetUrl);
+    const client = parsed.protocol === 'https:' ? https : http;
+
+    const headers = { ...req.headers };
+    headers.host = parsed.host;
+    delete headers['x-relay-target'];
+    delete headers['x-relay-path'];
+
+    const proxyReq = client.request(targetUrl, {
+      method: req.method,
+      headers: headers
+    }, (proxyRes) => {
+      const responseHeaders = { ...proxyRes.headers };
+      responseHeaders['access-control-allow-origin'] = '*';
+      responseHeaders['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+      responseHeaders['access-control-allow-headers'] = '*';
+
+      res.writeHead(proxyRes.statusCode, responseHeaders);
+      proxyRes.pipe(res);
+    });
+
+    proxyReq.on('error', (err) => {
+      console.error(`[Relay Error] ${targetUrl}:`, err.message);
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Bad Gateway: ' + err.message }));
+      }
+    });
+
+    req.pipe(proxyReq);
+  } catch (err) {
+    console.error(`[Relay Error] Invalid URL ${targetUrl}:`, err.message);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Internal Server Error: ' + err.message }));
+    }
+  }
+}
+
+// HTTP Server for Webhook, Relay, and Keep-Alive
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
 
   if (req.method === 'OPTIONS') {
     res.writeHead(200);
@@ -248,19 +290,43 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Health Check / Ping
+  // 1. Health Check / Ping
   if (req.method === 'GET' && (req.url === '/' || req.url === '/health')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'ok',
-      service: 'dumble-tv-player-bot',
-      version: '4.0.0',
+      service: 'dumble-tv-player-bot-and-relay',
+      version: '5.0.0',
       timestamp: new Date().toISOString()
     }));
     return;
   }
 
-  // Telegram Webhook Endpoint
+  // 2. 9router / Generic x-relay-target header
+  const relayTarget = req.headers['x-relay-target'];
+  if (relayTarget) {
+    const relayPath = req.headers['x-relay-path'] || req.url;
+    const fullTarget = relayTarget.replace(/\/+$/, '') + (relayPath.startsWith('/') ? relayPath : '/' + relayPath);
+    forwardRequest(req, res, fullTarget);
+    return;
+  }
+
+  // 3. Telegram API Relay (/bot... or /file/bot...)
+  if (req.url.startsWith('/bot') || req.url.startsWith('/file/bot')) {
+    const targetUrl = 'https://api.telegram.org' + req.url;
+    forwardRequest(req, res, targetUrl);
+    return;
+  }
+
+  // 4. Gemini Relay (/relay/gemini/...)
+  if (req.url.startsWith('/relay/gemini/')) {
+    const geminiPath = req.url.replace(/^\/relay\/gemini\//, '');
+    const targetUrl = 'https://generativelanguage.googleapis.com/' + geminiPath;
+    forwardRequest(req, res, targetUrl);
+    return;
+  }
+
+  // 5. Telegram Webhook Endpoint
   if (req.method === 'POST' && req.url === '/webhook') {
     let body = '';
     req.on('data', chunk => {
