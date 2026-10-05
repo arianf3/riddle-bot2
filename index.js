@@ -55,20 +55,20 @@ function getMainMenuMarkup() {
         { text: '▶️ ورود به تلویزیون و تماشای آنلاین (Play)', web_app: { url: WEBAPP_URL } }
       ],
       [
-        { text: '⚽️ پخش زنده فوتبال', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/categories/sports.m3u` } },
-        { text: '📺 شبکه‌های سراسری', web_app: { url: `${WEBAPP_URL}?url=playlist.m3u` } }
+        { text: '⚽️ پخش زنده فوتبال', web_app: { url: WEBAPP_URL } },
+        { text: '📺 شبکه‌های سراسری', web_app: { url: WEBAPP_URL } }
       ],
       [
-        { text: '📡 شبکه‌های ماهواره‌ای', web_app: { url: `${WEBAPP_URL}?url=playlist_hd.m3u` } },
-        { text: '🎬 فیلم و سریال', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/categories/movies.m3u` } }
+        { text: '📡 شبکه‌های ماهواره‌ای', web_app: { url: WEBAPP_URL } },
+        { text: '🎬 فیلم و سریال', web_app: { url: WEBAPP_URL } }
       ],
       [
-        { text: '🎵 موزیک ۲۴ ساعته', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/categories/music.m3u` } },
-        { text: '🌐 شبکه‌های خارجی (US/UK)', web_app: { url: `${WEBAPP_URL}?url=https://iptv-org.github.io/iptv/languages/eng.m3u` } }
+        { text: '🎵 موزیک ۲۴ ساعته', web_app: { url: WEBAPP_URL } },
+        { text: '🌐 شبکه‌های خارجی (US/UK)', web_app: { url: WEBAPP_URL } }
       ],
       [
-        { text: '🔞 بخش بزرگسالان (+18)', callback_data: 'menu_adult_info' },
-        { text: '📱 راهنمای تماشا و کیفیت', callback_data: 'menu_guide' }
+        { text: '🔞 بخش بزرگسالان (+18)', web_app: { url: WEBAPP_URL } },
+        { text: '📱 راهنمای تماشا و کیفیت', web_app: { url: WEBAPP_URL } }
       ],
       [
         { text: '📢 کانال رسمی (@rad_protocol)', url: CHANNEL_LINK },
