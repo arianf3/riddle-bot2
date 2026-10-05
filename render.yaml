@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: riddle-relay-bot
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 3000
