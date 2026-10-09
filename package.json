@@ -1,11 +1,11 @@
 {
-  "name": "radprotocol-deal-hunter-bot",
-  "version": "3.0.0",
-  "description": "RadProtocol Telegram Deal & Freebie Hunter Bot with Force-Join, Category Alerts, and Smart Search",
-  "main": "index.js",
+  "name": "riddle-ai-bot",
+  "version": "4.0.0",
+  "description": "Riddle AI Telegram Bot (Google Gemini 3.8 Flash, Dual Mode for Groups & DMs, Code & Knowledge Specialist)",
+  "main": "bot.js",
   "scripts": {
-    "build": "node deploy_cf.js",
-    "start": "node index.js"
+    "start": "node bot.js",
+    "worker": "node worker.js"
   },
   "engines": {
     "node": ">=18"
