@@ -1,5 +1,8 @@
 const fs = require("fs");
 const path = require("path");
+const http = require('http');
+const https = require('https');
+const { exec } = require('child_process');
 
 // Load .env file safely
 try {
@@ -17,9 +20,6 @@ try {
   }
 } catch (e) {}
 
-const http = require('http');
-const https = require('https');
-
 // ==========================================
 // CONFIGURATION
 // ==========================================
@@ -32,17 +32,23 @@ const CONFIG = {
   PROXY_PORT: 20808,
   BOT_USERNAME: 'Gifty_buyapp_bot',
   MAX_HISTORY: 8,
+  OWNER_IDS: ['8602316735', '8678906046', '7746536015', '8709663394'],
   SYSTEM_PROMPT: `تو «🐍 ریدل (Riddle)» هستی؛ یک دستیار هوش مصنوعی نابغه، کاریزماتیک، به شدت باهوش و در عین حال شوخ‌طبع، رفیق و صمیمی (دقیقاً مثل سبک خرابکار).
 ویژگی‌های کلیدی تو:
 ۱. زبان و لحن: کاملاً فارسی محاوره‌ای، روان، گرم و باحال. هیچ‌وقت رباتیک، خشک یا رسمی حرف نزن.
-۲. تخصص‌ها: مسلط به برنامه‌نویسی، طراحی وب، امنیت، شبکه، بازی‌ها، علوم پایه و مسائل روزمره.
+۲. تخصص‌ها: مسلط به برنامه‌نویسی، طراحی وب، لینوکس، ترمینال، شبکه، امنیت، بازی‌ها و علوم روزمره.
 ۳. در کدنویسی: کدهای تمیز، مدرن و با کامنت‌های مختصر بنویس و داخل بلوک‌های کد استاندارد قرار بده.
-۴. شوخ‌طبعی: حاضرجواب، تیز و باانرژی باش، ولی همیشه بااحترام و کمک‌کننده.
-۵. خلاصه و رسا: پاسخ‌ها را متناسب با سوال کاربر بده، زیاده‌گویی نکن مگر اینکه توضیح فنی لازم باشد.`
+۴. تحلیل تصاویر: تو قابلیت بینایی ماشین (Vision) داری و تصاویر ارسالی را به طور کامل می‌بینی و با جزئیات تحلیل می‌کنی.
+۵. شوخ‌طبعی: حاضرجواب، تیز و باانرژی باش، ولی همیشه بااحترام و کمک‌کننده.
+۶. اگر مالک ربات دستوری برای اجرا در ترمینال یا دستکاری کد خواست، می‌توانی دستور لینوکس را در بلوک \`\`\`bash قرار دهی تا سیستم به صورت خودکار آن را اجرا کرده و خروجی را اضافه کند.`
 };
 
 // In-memory conversation context: chatId -> array of {role, content}
 const chatHistories = new Map();
+
+function isOwner(userId) {
+  return CONFIG.OWNER_IDS.includes(String(userId));
+}
 
 // ==========================================
 // TELEGRAM HTTP CLIENT VIA LOCAL PROXY
@@ -51,7 +57,6 @@ function callTelegram(method, payload = {}) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify(payload);
     
-    // Connect to Telegram API via CONNECT tunnel over local proxy
     const connectReq = http.request({
       host: CONFIG.PROXY_HOST,
       port: CONFIG.PROXY_PORT,
@@ -96,19 +101,90 @@ function callTelegram(method, payload = {}) {
   });
 }
 
+// Download Telegram file buffer via proxy
+function downloadTelegramFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const connectReq = http.request({
+      host: CONFIG.PROXY_HOST,
+      port: CONFIG.PROXY_PORT,
+      method: 'CONNECT',
+      path: 'api.telegram.org:443'
+    });
+
+    connectReq.on('connect', (res, socket) => {
+      if (res.statusCode !== 200) {
+        return reject(new Error(`Proxy CONNECT failed: ${res.statusCode}`));
+      }
+
+      const agent = new https.Agent({ socket });
+      const req = https.request({
+        host: 'api.telegram.org',
+        path: `/file/bot${CONFIG.TELEGRAM_TOKEN}/${filePath}`,
+        method: 'GET',
+        agent: agent
+      }, (apiRes) => {
+        const chunks = [];
+        apiRes.on('data', chunk => chunks.push(chunk));
+        apiRes.on('end', () => {
+          resolve(Buffer.concat(chunks));
+        });
+      });
+
+      req.on('error', reject);
+      req.end();
+    });
+
+    connectReq.on('error', reject);
+    connectReq.end();
+  });
+}
+
+// ==========================================
+// TERMINAL RUNNER (FOR OWNER)
+// ==========================================
+function runTerminal(cmd) {
+  return new Promise((resolve) => {
+    exec(cmd, { cwd: '/root', timeout: 45000, maxBuffer: 1024 * 1024 * 2 }, (error, stdout, stderr) => {
+      let out = (stdout || '').trim();
+      let err = (stderr || '').trim();
+      let res = '';
+      if (out) res += out;
+      if (err) res += (res ? '\n[STDERR]\n' : '') + err;
+      if (error && !err) res += (res ? '\n' : '') + `Exit: ${error.message}`;
+      if (!res) res = '✅ دستور با موفقیت و بدون خروجی اجرا شد (Exit Code: 0)';
+      resolve(res);
+    });
+  });
+}
+
 // ==========================================
 // CALL LOCAL AI (9ROUTER GEMINI 3.8 FLASH)
 // ==========================================
-function callAI(chatId, userPrompt) {
+function callAI(chatId, userPrompt, imageBuffer = null) {
   return new Promise((resolve, reject) => {
-    // 1. Get or create history
     let history = chatHistories.get(chatId) || [];
     
-    // Build messages array
+    let userMsgContent;
+    if (imageBuffer) {
+      const b64 = imageBuffer.toString('base64');
+      userMsgContent = [
+        {
+          type: 'text',
+          text: userPrompt || 'این تصویر را با دقت بررسی و تحلیل کن و تمام جزئیات یا متون آن را به زبان فارسی توضیح بده.'
+        },
+        {
+          type: 'image_url',
+          image_url: { url: `data:image/jpeg;base64,${b64}` }
+        }
+      ];
+    } else {
+      userMsgContent = userPrompt;
+    }
+
     const messages = [
       { role: 'system', content: CONFIG.SYSTEM_PROMPT },
       ...history,
-      { role: 'user', content: userPrompt }
+      { role: 'user', content: userMsgContent }
     ];
 
     const postData = JSON.stringify({
@@ -132,7 +208,7 @@ function callAI(chatId, userPrompt) {
         'Authorization': `Bearer ${CONFIG.AI_API_KEY}`,
         'Content-Length': Buffer.byteLength(postData)
       },
-      timeout: 30000
+      timeout: 45000
     }, (res) => {
       let body = '';
       res.on('data', chunk => body += chunk);
@@ -142,8 +218,8 @@ function callAI(chatId, userPrompt) {
           if (json.choices && json.choices.length > 0) {
             const reply = json.choices[0].message?.content || 'پاسخی دریافت نشد.';
             
-            // Save to history
-            history.push({ role: 'user', content: userPrompt });
+            // Save clean text summary to history (avoid bloated b64 in memory)
+            history.push({ role: 'user', content: userPrompt || '[تصویر ارسال شد]' });
             history.push({ role: 'assistant', content: reply });
             if (history.length > CONFIG.MAX_HISTORY * 2) {
               history = history.slice(-CONFIG.MAX_HISTORY * 2);
@@ -181,7 +257,6 @@ async function sendLongMessage(chatId, text, replyToId = null) {
       parse_mode: 'Markdown',
       reply_to_message_id: replyToId
     }).catch(() => {
-      // Fallback without parse_mode if Markdown parsing fails
       return callTelegram('sendMessage', {
         chat_id: chatId,
         text: text,
@@ -190,7 +265,6 @@ async function sendLongMessage(chatId, text, replyToId = null) {
     });
   }
 
-  // Chunking
   for (let i = 0; i < text.length; i += MAX_LEN) {
     const chunk = text.slice(i, i + MAX_LEN);
     await callTelegram('sendMessage', {
@@ -213,28 +287,73 @@ async function sendLongMessage(chatId, text, replyToId = null) {
 // ==========================================
 async function handleUpdate(update) {
   const msg = update.message;
-  if (!msg || (!msg.text && !msg.caption)) return;
+  if (!msg) return;
 
   const chatId = msg.chat.id;
   const chatType = msg.chat.type; // 'private', 'group', 'supergroup'
   const text = (msg.text || msg.caption || '').trim();
   const messageId = msg.message_id;
+  const fromId = msg.from ? msg.from.id : chatId;
   const fromUser = msg.from ? (msg.from.first_name || 'کاربر') : 'کاربر';
+  const hasPhoto = Array.isArray(msg.photo) && msg.photo.length > 0;
+
+  if (!text && !hasPhoto) return;
+
+  // ================= ADMIN / TERMINAL COMMANDS =================
+  if (text.startsWith('/sh ') || text.startsWith('/exec ') || text.startsWith('/bash ')) {
+    if (!isOwner(fromId)) {
+      return callTelegram('sendMessage', {
+        chat_id: chatId,
+        text: '⛔️ دسترسی غیرمجاز. این قابلیت فقط مخصوص مالک ربات است.',
+        reply_to_message_id: messageId
+      });
+    }
+
+    const cmd = text.replace(/^(\/sh|\/exec|\/bash)\s+/i, '').trim();
+    callTelegram('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+    const out = await runTerminal(cmd);
+    const replyText = `💻 *دستور لینوکس:*\n\`${cmd}\`\n\n*خروجی:*\n\`\`\`\n${out.slice(0, 3800)}\n\`\`\``;
+    return sendLongMessage(chatId, replyText, messageId);
+  }
+
+  // /cat <filepath>
+  if (text.startsWith('/cat ')) {
+    if (!isOwner(fromId)) return;
+    const targetPath = text.replace('/cat ', '').trim();
+    try {
+      const content = fs.readFileSync(path.resolve(targetPath), 'utf-8');
+      return sendLongMessage(chatId, `📄 *محتوای فایل:* \`${targetPath}\`\n\n\`\`\`\n${content.slice(0, 3800)}\n\`\`\``, messageId);
+    } catch (e) {
+      return callTelegram('sendMessage', {
+        chat_id: chatId,
+        text: `❌ خطا در خواندن فایل: ${e.message}`,
+        reply_to_message_id: messageId
+      });
+    }
+  }
+
+  // /ls [dir]
+  if (text === '/ls' || text.startsWith('/ls ')) {
+    if (!isOwner(fromId)) return;
+    const targetDir = text === '/ls' ? '/root' : text.replace('/ls ', '').trim();
+    const out = await runTerminal(`ls -la "${targetDir}"`);
+    return sendLongMessage(chatId, `📁 *محتوای دایرکتوری:* \`${targetDir}\`\n\n\`\`\`\n${out}\n\`\`\``, messageId);
+  }
 
   // 1. Command: /start
   if (text === '/start') {
     chatHistories.delete(chatId);
     const welcome =
       `سلام *${fromUser}* عزیز! 🐍✨\n\n` +
-      `من *ریدل (Riddle)* هستم؛ دستیار هوش مصنوعی همه‌چیزدان و شوخ‌طبع مجهز به مغز قدرتمند *Google Gemini 3.8 Flash*! 🧠⚡️\n\n` +
+      `من *ریدل (Riddle)* هستم؛ دستیار هوش مصنوعی همه‌چیزدان، مجهز به بینایی ماشین (Vision)، ترمینال لینوکس و مغز قدرتمند *Google Gemini 3.8 Flash*! 🧠⚡️\n\n` +
       `🔥 *کارهایی که برات انجام میدم:*\n` +
-      `• پاسخ به هر سوال علمی، عمومی، برنامه‌نویسی و فناوری\n` +
-      `• نوشتن، عیب‌یابی و بهینه‌سازی کدهای پایتون، جاوااسکریپت و...\n` +
-      `• چت و شوخی در گروه‌ها و چت‌های دوستانه\n` +
-      `• ارائه پیشنهادات تخصصی و حل مسائل پیچیده\n\n` +
+      `• 🖼 *دیدن و تحلیل عکس‌ها:* هر عکسی رو بفرستی با توضیحات یا سوال، مو‌به‌مو می‌خونم و تحلیل می‌کنم!\n` +
+      `• 💻 *برنامه‌نویسی و کدنویسی:* نوشتن، دیباگ و اصلاح انواع زبان‌ها\n` +
+      `• ⚡️ *اجرای ترمینال:* اجرای مستقیم دستورات شل لینوکس (برای مالک با \`/sh <دستور>\`)\n` +
+      `• 👥 *چت و سرگرمی در گروه‌ها*\n\n` +
       `👇 *نحوه استفاده:*\n` +
-      `• توی پیوی هر چی دلت می‌خواد بنویس تا بلافاصله جوابت رو بدم!\n` +
-      `• توی گروه‌ها من رو منشن کن، یا روی پیامم ریپلای بزن، یا بنویس: \`/ask سوالت\``;
+      `• توی پیوی متن یا عکس بفرست تا درجا جواب بدم!\n` +
+      `• توی گروه‌ها ریپلای بزن، یا منشن کن، یا بنویس: \`/ask سوالت\``;
 
     return callTelegram('sendMessage', {
       chat_id: chatId,
@@ -273,7 +392,8 @@ async function handleUpdate(update) {
       `━━━━━━━━━━━━━━━━━━\n` +
       `• *مدل:* \`${CONFIG.AI_MODEL}\`\n` +
       `• *توسعه‌دهنده هسته:* Google DeepMind (Gemini 3.8 Flash)\n` +
-      `• *نوع مصرف:* نسخه بهینه و فوق سریع (Low-Latency / Optimized)\n` +
+      `• *قابلیت بینایی ماشین (Vision):* فعال ✅ (پشتیبانی از عکس‌ها)\n` +
+      `• *ترمینال لینوکس:* فعال ✅ (ویژه مالک با \`/sh\`)\n` +
       `• *موتور ارتباطی:* 9router Relay Hub\n` +
       `• *وضعیت سرویس:* آنلاین و فعال 🟢`;
     return callTelegram('sendMessage', {
@@ -289,16 +409,18 @@ async function handleUpdate(update) {
     const helpText =
       `📖 *راهنمای استفاده از ربات هوش مصنوعی ریدل (Riddle):*\n\n` +
       `💬 *در چت شخصی (پیوی):*\n` +
-      `فقط کافیه هر سوالی یا درخواستی داری رو به صورت عادی بفرستی.\n\n` +
+      `• هر سوال متنی یا عکسی داری بفرست تا مستقیم بررسی و پاسخ داده بشه.\n\n` +
       `👥 *در گروه‌ها و سوپرگروه‌ها:*\n` +
-      `برای اینکه ربات در گروه شلوغی ایجاد نکنه، فقط به پیام‌هایی جواب میده که:\n` +
       `۱. روی پیام ربات *ریپلای (Reply)* بزنید.\n` +
       `۲. ربات رو منشن کنید (مثلاً: \`@${CONFIG.BOT_USERNAME}\` یا کلمه *«ریدل»*).\n` +
       `۳. اول پیامتون بنویسید: \`/ask <متن سوال>\`\n\n` +
       `⚙️ *دستورات کاربردی:*\n` +
       `• \`/reset\` - پاک کردن تاریخچه چت فعلی\n` +
-      `• \`/model\` - نمایش مدل هوش مصنوعی فعال\n` +
-      `• \`/ping\` - تست سرعت و پینگ ربات`;
+      `• \`/model\` - نمایش مشخصات مدل و وضعیت ویژن\n` +
+      `• \`/ping\` - تست سرعت و پینگ ربات\n` +
+      `• \`/sh <دستور>\` - اجرای شل لینوکس (مخصوص مالک)\n` +
+      `• \`/cat <فایل>\` - مشاهده محتوای فایل در سرور\n` +
+      `• \`/ls <مسیر>\` - لیست فایل‌ها در سرور`;
     return callTelegram('sendMessage', {
       chat_id: chatId,
       text: helpText,
@@ -339,9 +461,8 @@ async function handleUpdate(update) {
     const isMentioned = text.includes(`@${CONFIG.BOT_USERNAME}`) || text.toLowerCase().includes('ریدل') || text.toLowerCase().includes('riddle');
     const isAskCmd = text.startsWith('/ask');
 
-    if (isReplyToBot || isMentioned || isAskCmd) {
+    if (isReplyToBot || isMentioned || isAskCmd || hasPhoto) {
       shouldReply = true;
-      // Clean query
       userQuery = text
         .replace(new RegExp(`@${CONFIG.BOT_USERNAME}`, 'gi'), '')
         .replace(/^\/ask\s*/i, '')
@@ -349,13 +470,39 @@ async function handleUpdate(update) {
     }
   }
 
-  if (!shouldReply || !userQuery) return;
+  if (!shouldReply) return;
 
-  // Show typing indicator
-  callTelegram('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+  // Show typing or uploading photo action
+  callTelegram('sendChatAction', {
+    chat_id: chatId,
+    action: hasPhoto ? 'upload_photo' : 'typing'
+  }).catch(() => {});
 
-  // Call AI
-  const aiAnswer = await callAI(chatId, userQuery);
+  let imageBuffer = null;
+  if (hasPhoto) {
+    try {
+      const bestPhoto = msg.photo[msg.photo.length - 1];
+      const fileInfo = await callTelegram('getFile', { file_id: bestPhoto.file_id });
+      if (fileInfo && fileInfo.ok && fileInfo.result.file_path) {
+        imageBuffer = await downloadTelegramFile(fileInfo.result.file_path);
+      }
+    } catch (err) {
+      console.error('Error downloading photo:', err);
+    }
+  }
+
+  // Call AI (multimodal if imageBuffer present)
+  let aiAnswer = await callAI(chatId, userQuery, imageBuffer);
+
+  // If owner and AI suggested a bash command, execute it autonomously
+  if (isOwner(fromId) && aiAnswer.includes('```bash')) {
+    const bashMatch = aiAnswer.match(/```bash\s*([\s\S]*?)\s*```/);
+    if (bashMatch && bashMatch[1]) {
+      const autoCmd = bashMatch[1].trim();
+      const execResult = await runTerminal(autoCmd);
+      aiAnswer += `\n\n💻 *خروجی اجرای خودکار در ترمینال:*\n\`\`\`\n${execResult.slice(0, 3000)}\n\`\`\``;
+    }
+  }
 
   // Send reply
   await sendLongMessage(chatId, aiAnswer, messageId);
@@ -378,7 +525,7 @@ async function handleCallback(cq) {
   } else if (data === 'model_info') {
     await callTelegram('answerCallbackQuery', {
       callback_query_id: cqId,
-      text: `مدل هوش مصنوعی: ${CONFIG.AI_MODEL} (Google Gemini 3.8 Flash)`,
+      text: `مدل هوش مصنوعی: ${CONFIG.AI_MODEL} (Google Gemini 3.8 Flash + Vision)`,
       show_alert: true
     });
   } else {
@@ -430,11 +577,12 @@ async function pollUpdates() {
 // MAIN BOOTSTRAP
 // ==========================================
 async function main() {
-  console.log('🐍 Riddle AI Bot is starting...');
+  console.log('🐍 Riddle AI Bot v4.1 is starting...');
   console.log(`🤖 AI Model: ${CONFIG.AI_MODEL}`);
   console.log(`🌐 AI Endpoint: ${CONFIG.AI_API_BASE}`);
+  console.log(`👁 Vision / Image Analysis: Enabled`);
+  console.log(`💻 Terminal & Code Execution: Enabled (Owner: ${CONFIG.OWNER_IDS.join(', ')})`);
 
-  // Test Telegram connection
   try {
     const me = await callTelegram('getMe');
     if (!me.ok) {
@@ -443,7 +591,6 @@ async function main() {
     }
     console.log(`✅ Connected to Telegram! Bot: @${me.result.username} (${me.result.first_name})`);
 
-    // Remove any webhook before long-polling
     await callTelegram('deleteWebhook', { drop_pending_updates: true });
 
     console.log('🚀 Long-polling started! Ready for messages...');
