@@ -31,7 +31,8 @@ const CONFIG = {
   PROXY_HOST: '127.0.0.1',
   PROXY_PORT: 20808,
   BOT_USERNAME: 'Gifty_buyapp_bot',
-  MAX_HISTORY: 8,
+  MAX_HISTORY: 10,
+  ENABLE_PROXY: process.env.ENABLE_PROXY !== 'false',
   OWNER_IDS: ['8602316735', '8678906046', '7746536015', '8709663394'],
   SYSTEM_PROMPT: `تو «🐍 ریدل (Riddle)» هستی؛ یک دستیار هوش مصنوعی نابغه، کاریزماتیک، به شدت باهوش و در عین حال شوخ‌طبع، رفیق و صمیمی (دقیقاً مثل سبک خرابکار).
 ویژگی‌های کلیدی تو:
@@ -51,22 +52,49 @@ function isOwner(userId) {
 }
 
 // ==========================================
-// TELEGRAM HTTP CLIENT VIA LOCAL PROXY
+// TELEGRAM HTTP CLIENT (PROXY + DIRECT FALLBACK)
 // ==========================================
 function callTelegram(method, payload = {}) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify(payload);
     
+    const makeDirectRequest = () => {
+      const req = https.request({
+        host: 'api.telegram.org',
+        path: `/bot${CONFIG.TELEGRAM_TOKEN}/${method}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData)
+        },
+        timeout: 35000
+      }, (apiRes) => {
+        let body = '';
+        apiRes.on('data', chunk => body += chunk);
+        apiRes.on('end', () => {
+          try { resolve(JSON.parse(body)); } catch (e) { resolve({ ok: false, error: body }); }
+        });
+      });
+      req.on('error', reject);
+      req.write(postData);
+      req.end();
+    };
+
+    if (!CONFIG.ENABLE_PROXY) {
+      return makeDirectRequest();
+    }
+
     const connectReq = http.request({
       host: CONFIG.PROXY_HOST,
       port: CONFIG.PROXY_PORT,
       method: 'CONNECT',
-      path: 'api.telegram.org:443'
+      path: 'api.telegram.org:443',
+      timeout: 5000
     });
 
     connectReq.on('connect', (res, socket) => {
       if (res.statusCode !== 200) {
-        return reject(new Error(`Proxy CONNECT failed: ${res.statusCode}`));
+        return makeDirectRequest();
       }
 
       const agent = new https.Agent({ socket });
@@ -78,42 +106,56 @@ function callTelegram(method, payload = {}) {
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData)
-        }
+        },
+        timeout: 35000
       }, (apiRes) => {
         let body = '';
         apiRes.on('data', chunk => body += chunk);
         apiRes.on('end', () => {
-          try {
-            resolve(JSON.parse(body));
-          } catch (e) {
-            resolve({ ok: false, error: body });
-          }
+          try { resolve(JSON.parse(body)); } catch (e) { resolve({ ok: false, error: body }); }
         });
       });
 
-      req.on('error', reject);
+      req.on('error', () => makeDirectRequest());
       req.write(postData);
       req.end();
     });
 
-    connectReq.on('error', reject);
+    connectReq.on('error', () => makeDirectRequest());
+    connectReq.on('timeout', () => {
+      connectReq.destroy();
+      makeDirectRequest();
+    });
     connectReq.end();
   });
 }
 
-// Download Telegram file buffer via proxy
+// Download Telegram file buffer via proxy with direct fallback
 function downloadTelegramFile(filePath) {
   return new Promise((resolve, reject) => {
+    const makeDirectDownload = () => {
+      https.get(`https://api.telegram.org/file/bot${CONFIG.TELEGRAM_TOKEN}/${filePath}`, { timeout: 25000 }, (res) => {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+      }).on('error', reject);
+    };
+
+    if (!CONFIG.ENABLE_PROXY) {
+      return makeDirectDownload();
+    }
+
     const connectReq = http.request({
       host: CONFIG.PROXY_HOST,
       port: CONFIG.PROXY_PORT,
       method: 'CONNECT',
-      path: 'api.telegram.org:443'
+      path: 'api.telegram.org:443',
+      timeout: 5000
     });
 
     connectReq.on('connect', (res, socket) => {
       if (res.statusCode !== 200) {
-        return reject(new Error(`Proxy CONNECT failed: ${res.statusCode}`));
+        return makeDirectDownload();
       }
 
       const agent = new https.Agent({ socket });
@@ -121,20 +163,23 @@ function downloadTelegramFile(filePath) {
         host: 'api.telegram.org',
         path: `/file/bot${CONFIG.TELEGRAM_TOKEN}/${filePath}`,
         method: 'GET',
-        agent: agent
+        agent: agent,
+        timeout: 25000
       }, (apiRes) => {
         const chunks = [];
         apiRes.on('data', chunk => chunks.push(chunk));
-        apiRes.on('end', () => {
-          resolve(Buffer.concat(chunks));
-        });
+        apiRes.on('end', () => resolve(Buffer.concat(chunks)));
       });
 
-      req.on('error', reject);
+      req.on('error', () => makeDirectDownload());
       req.end();
     });
 
-    connectReq.on('error', reject);
+    connectReq.on('error', () => makeDirectDownload());
+    connectReq.on('timeout', () => {
+      connectReq.destroy();
+      makeDirectDownload();
+    });
     connectReq.end();
   });
 }
@@ -142,9 +187,9 @@ function downloadTelegramFile(filePath) {
 // ==========================================
 // TERMINAL RUNNER (FOR OWNER)
 // ==========================================
-function runTerminal(cmd) {
+function runTerminal(cmd, customCwd = '/root') {
   return new Promise((resolve) => {
-    exec(cmd, { cwd: '/root', timeout: 45000, maxBuffer: 1024 * 1024 * 2 }, (error, stdout, stderr) => {
+    exec(cmd, { cwd: customCwd, timeout: 60000, maxBuffer: 1024 * 1024 * 3 }, (error, stdout, stderr) => {
       let out = (stdout || '').trim();
       let err = (stderr || '').trim();
       let res = '';
@@ -158,19 +203,216 @@ function runTerminal(cmd) {
 }
 
 // ==========================================
+// WEB SEARCH ENGINE (DUCKDUCKGO HTML + API)
+// ==========================================
+async function searchWeb(query) {
+  try {
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const html = await new Promise((resolve, reject) => {
+      const req = https.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'fa,en-US;q=0.9,en;q=0.8'
+        },
+        timeout: 10000
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Search timeout')); });
+    });
+
+    const results = [];
+    const snippetMatches = [...html.matchAll(/<a class="result__snippet[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi)];
+    const titleMatches = [...html.matchAll(/<a class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi)];
+
+    for (let i = 0; i < Math.min(titleMatches.length, 5); i++) {
+      const title = titleMatches[i][2].replace(/<[^>]+>/g, '').trim();
+      const rawLink = titleMatches[i][1];
+      let actualUrl = rawLink;
+      const uddgMatch = rawLink.match(/uddg=([^&]+)/);
+      if (uddgMatch) actualUrl = decodeURIComponent(uddgMatch[1]);
+      const snippet = snippetMatches[i] ? snippetMatches[i][2].replace(/<[^>]+>/g, '').trim() : '';
+      if (title) results.push({ title, url: actualUrl, snippet });
+    }
+
+    if (results.length > 0) return results;
+
+    const apiRes = await new Promise((resolve) => {
+      https.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json`, { timeout: 8000 }, (res) => {
+        let d = '';
+        res.on('data', chunk => d += chunk);
+        res.on('end', () => {
+          try { resolve(JSON.parse(d)); } catch(e) { resolve(null); }
+        });
+      }).on('error', () => resolve(null));
+    });
+
+    if (apiRes && (apiRes.AbstractText || apiRes.Heading)) {
+      return [{ title: apiRes.Heading || query, url: apiRes.AbstractURL || '', snippet: apiRes.AbstractText || 'اطلاعات از دایره‌المعارف وب' }];
+    }
+    return [];
+  } catch (err) {
+    console.error('Web search error:', err.message);
+    return [];
+  }
+}
+
+// ==========================================
+// AUTONOMOUS GITHUB REPO ANALYZER & INSTALLER
+// ==========================================
+async function handleGitHubRepo(chatId, repoUrl, fromId, messageId, forceInstall = false) {
+  const match = repoUrl.match(/github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)/);
+  if (!match) return false;
+
+  const owner = match[1];
+  let repo = match[2].replace(/\.git$/, '');
+  const cleanUrl = `https://github.com/${owner}/${repo}.git`;
+  const baseDir = '/root/installed_projects';
+  const targetDir = `${baseDir}/${repo}`;
+
+  await callTelegram('sendMessage', {
+    chat_id: chatId,
+    text: `🔍 *در حال بررسی مخزن گیت‌هاب:*\n\`${owner}/${repo}\`\n\n⏳ در حال کلون و دریافت کدهای پروژه از گیت‌هاب...`,
+    parse_mode: 'Markdown',
+    reply_to_message_id: messageId
+  });
+
+  try {
+    if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
+
+    let cloneLog = '';
+    if (fs.existsSync(targetDir)) {
+      cloneLog = await runTerminal(`git pull`, targetDir);
+    } else {
+      cloneLog = await runTerminal(`git clone --depth 1 "${cleanUrl}" "${targetDir}"`, baseDir);
+    }
+
+    let fileList = [];
+    try { fileList = fs.readdirSync(targetDir); } catch(e) {}
+
+    let readmeContent = '';
+    const readmeFile = fileList.find(f => f.toLowerCase().startsWith('readme'));
+    if (readmeFile) {
+      try { readmeContent = fs.readFileSync(path.join(targetDir, readmeFile), 'utf8').slice(0, 3500); } catch(e) {}
+    }
+
+    let stackType = 'نامشخص / عمومی';
+    let installCmd = '';
+    let startCmd = '';
+
+    if (fileList.includes('package.json')) {
+      stackType = 'Node.js (JavaScript / TypeScript)';
+      installCmd = 'npm install';
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(targetDir, 'package.json'), 'utf8'));
+        if (pkg.scripts && pkg.scripts.start) startCmd = 'npm start';
+        else if (pkg.scripts && pkg.scripts.dev) startCmd = 'npm run dev';
+      } catch(e) {}
+    } else if (fileList.includes('requirements.txt') || fileList.includes('pyproject.toml') || fileList.includes('setup.py')) {
+      stackType = 'Python';
+      installCmd = 'python3 -m venv .venv && .venv/bin/pip install -r requirements.txt';
+      startCmd = 'python3 main.py';
+    } else if (fileList.includes('Cargo.toml')) {
+      stackType = 'Rust';
+      installCmd = 'cargo build --release';
+      startCmd = 'cargo run';
+    } else if (fileList.includes('go.mod')) {
+      stackType = 'Go (Golang)';
+      installCmd = 'go mod download && go build';
+      startCmd = `./${repo}`;
+    }
+
+    const aiPrompt = `شما مهندس ارشد نرم‌افزار هستید. یک مخزن گیت‌هاب به شرح زیر کلون شده است:
+نام مخزن: ${owner}/${repo}
+پشته فنی: ${stackType}
+فایل‌های کلیدی پروژه: ${fileList.slice(0, 25).join(', ')}
+
+بخشی از توضیحات README:
+${readmeContent || 'توضیحات README در دسترس نیست.'}
+
+لطفاً به زبان فارسی خودمانی و بسیار شیوا توضیح بده:
+۱. این پروژه دقیقاً چیه و چه کارایی داره؟
+۲. مهم‌ترین ویژگی‌هاش چیه؟
+۳. روش نصب، کانفیگ و ران کردنش چطوره؟`;
+
+    const aiAnalysis = await callAI(chatId, aiPrompt);
+
+    const quoteLines = aiAnalysis.split('\n').filter(l => l.trim().length > 0);
+    let quoteBlock = '';
+    if (quoteLines.length > 0) {
+      quoteBlock = `**> 📋 جزئیات و آموزش پروژه:\n` + quoteLines.map((l, idx) => `> ${l}${idx === quoteLines.length - 1 ? '||' : ''}`).join('\n');
+    }
+
+    let finalReport = `📦 *پروژه گیت‌هاب با موفقیت تحلیل شد:* \`${owner}/${repo}\`\n\n` +
+                      `🛠 **پشته نرم‌افزاری:** \`${stackType}\`\n` +
+                      `📁 **مسیر سورس روی سیستم:** \`${targetDir}\`\n\n` +
+                      `${quoteBlock}\n\n`;
+
+    if (forceInstall && isOwner(fromId)) {
+      finalReport += `🚀 *در حال شروع نصب خودکار وابستگی‌ها در پس‌زمینه...*`;
+      await callTelegram('sendMessage', {
+        chat_id: chatId,
+        text: finalReport,
+        parse_mode: 'Markdown'
+      });
+
+      let installResult = 'دستور نصب اتوماتیک برای این پشته تعریف نشده است.';
+      if (installCmd) {
+        installResult = await runTerminal(installCmd, targetDir);
+      }
+
+      await callTelegram('sendMessage', {
+        chat_id: chatId,
+        text: `✅ *عملیات نصب پکیج‌ها به پایان رسید:*\n\`${owner}/${repo}\`\n\n\`\`\`\n${installResult.slice(0, 3000)}\n\`\`\`\n\n💡 برای ران کردن پروژه:\n\`cd "${targetDir}" && ${startCmd || 'npm start'}\``,
+        parse_mode: 'Markdown'
+      });
+      return true;
+    } else {
+      if (installCmd && isOwner(fromId)) {
+        finalReport += `💡 *فرمان نصب خودکار برای مالک:* برای نصب و بیلد کامل این پروژه، همین حالا دستور زیر را ارسال کنید:\n\`/install ${cleanUrl}\``;
+      }
+      await callTelegram('sendMessage', {
+        chat_id: chatId,
+        text: finalReport,
+        parse_mode: 'Markdown'
+      });
+      return true;
+    }
+  } catch (err) {
+    console.error('GitHub handler error:', err);
+    await callTelegram('sendMessage', {
+      chat_id: chatId,
+      text: `❌ خطا در پردازش مخزن گیت‌هاب: ${err.message}`,
+      reply_to_message_id: messageId
+    });
+    return true;
+  }
+}
+
+// ==========================================
 // CALL LOCAL AI (9ROUTER GEMINI 3.8 FLASH)
 // ==========================================
-function callAI(chatId, userPrompt, imageBuffer = null) {
+function callAI(chatId, userPrompt, imageBuffer = null, webSearchResults = null) {
   return new Promise((resolve, reject) => {
     let history = chatHistories.get(chatId) || [];
     
+    let finalPrompt = userPrompt;
+    if (webSearchResults && webSearchResults.length > 0) {
+      const searchCtx = webSearchResults.map((r, i) => `[${i+1}] ${r.title}\nلینک: ${r.url}\nخلاصه: ${r.snippet}`).join('\n\n');
+      finalPrompt = `[اطلاعات زنده وب برای سوال کاربر]:\n${searchCtx}\n\n[پیام کاربر]:\n${userPrompt}\n\nبر اساس این نتایج زنده وب، پاسخ روان، مستند و کاملی بنویس.`;
+    }
+
     let userMsgContent;
     if (imageBuffer) {
       const b64 = imageBuffer.toString('base64');
       userMsgContent = [
         {
           type: 'text',
-          text: userPrompt || 'این تصویر را با دقت بررسی و تحلیل کن و تمام جزئیات یا متون آن را به زبان فارسی توضیح بده.'
+          text: finalPrompt || 'این تصویر را با دقت بررسی و تحلیل کن و تمام جزئیات یا متون آن را به زبان فارسی توضیح بده.'
         },
         {
           type: 'image_url',
@@ -178,7 +420,7 @@ function callAI(chatId, userPrompt, imageBuffer = null) {
         }
       ];
     } else {
-      userMsgContent = userPrompt;
+      userMsgContent = finalPrompt;
     }
 
     const messages = [
@@ -316,6 +558,38 @@ async function handleUpdate(update) {
     return sendLongMessage(chatId, replyText, messageId);
   }
 
+  // ================= GITHUB HANDLER (/install OR /git OR RAW LINK) =================
+  if (text.startsWith('/install ')) {
+    if (!isOwner(fromId)) {
+      return callTelegram('sendMessage', {
+        chat_id: chatId,
+        text: '⛔️ دستور نصب پروژه فقط مخصوص مالک است.',
+        reply_to_message_id: messageId
+      });
+    }
+    const repoUrl = text.replace('/install ', '').trim();
+    return handleGitHubRepo(chatId, repoUrl, fromId, messageId, true);
+  }
+
+  if (text.startsWith('/git ') || /https?:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+/.test(text)) {
+    const gitMatch = text.match(/https?:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+/);
+    if (gitMatch) {
+      const isInstallRequested = text.includes('نصب') || text.includes('install') || text.startsWith('/install');
+      return handleGitHubRepo(chatId, gitMatch[0], fromId, messageId, isInstallRequested && isOwner(fromId));
+    }
+  }
+
+  // ================= WEB SEARCH COMMAND (/search OR /web) =================
+  let webSearchData = null;
+  const isSearchCmd = text.startsWith('/search ') || text.startsWith('/web ');
+  const needsWebSearch = isSearchCmd || (text.length > 15 && (text.includes('اخبار') || text.includes('آخرین نسخه') || text.includes('قیمت امروز') || text.includes('سرچ کن') || text.includes('جستجو کن')));
+
+  if (needsWebSearch) {
+    callTelegram('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+    const query = isSearchCmd ? text.replace(/^(\/search|\/web)\s+/i, '').trim() : text;
+    webSearchData = await searchWeb(query);
+  }
+
   // /cat <filepath>
   if (text.startsWith('/cat ')) {
     if (!isOwner(fromId)) return;
@@ -345,14 +619,14 @@ async function handleUpdate(update) {
     chatHistories.delete(chatId);
     const welcome =
       `سلام *${fromUser}* عزیز! 🐍✨\n\n` +
-      `من *ریدل (Riddle)* هستم؛ دستیار هوش مصنوعی همه‌چیزدان، مجهز به بینایی ماشین (Vision)، ترمینال لینوکس و مغز قدرتمند *Google Gemini 3.8 Flash*! 🧠⚡️\n\n` +
+      `من *ریدل (Riddle)* هستم؛ دستیار هوش مصنوعی همه‌چیزدان، مجهز به بینایی ماشین (Vision)، جستجوی زنده وب، آنالیز و نصب خودکار گیت‌هاب و مغز قدرتمند *Google Gemini 3.8 Flash*! 🧠⚡️\n\n` +
       `🔥 *کارهایی که برات انجام میدم:*\n` +
-      `• 🖼 *دیدن و تحلیل عکس‌ها:* هر عکسی رو بفرستی با توضیحات یا سوال، مو‌به‌مو می‌خونم و تحلیل می‌کنم!\n` +
-      `• 💻 *برنامه‌نویسی و کدنویسی:* نوشتن، دیباگ و اصلاح انواع زبان‌ها\n` +
-      `• ⚡️ *اجرای ترمینال:* اجرای مستقیم دستورات شل لینوکس (برای مالک با \`/sh <دستور>\`)\n` +
-      `• 👥 *چت و سرگرمی در گروه‌ها*\n\n` +
+      `• 📦 *تحلیل و نصب گیت‌هاب:* لینک هر پروژه‌ای رو بفرستی، کلونش می‌کنم، معمارش رو برات توضیح میدم و با \`/install <لینک>\` وابستگی‌هاشو برات نصب می‌کنم!\n` +
+      `• 🌐 *جستجوی زنده وب:* اخبار روز، قیمت‌ها یا هر چیزی رو با \`/search <متن>\` از وب می‌کشم بیرون\n` +
+      `• 🖼 *دیدن و تحلیل عکس‌ها:* هر عکسی رو بفرستی مو‌به‌مو می‌خونم و تحلیل می‌کنم\n` +
+      `• 💻 *برنامه‌نویسی و ترمینال:* نوشتن کد و اجرای مستقیم لینوکس با \`/sh <دستور>\`\n\n` +
       `👇 *نحوه استفاده:*\n` +
-      `• توی پیوی متن یا عکس بفرست تا درجا جواب بدم!\n` +
+      `• توی پیوی هر سوال یا لینکی داری بفرست تا مستقیم بررسی بشه!\n` +
       `• توی گروه‌ها ریپلای بزن، یا منشن کن، یا بنویس: \`/ask سوالت\``;
 
     return callTelegram('sendMessage', {
@@ -491,8 +765,8 @@ async function handleUpdate(update) {
     }
   }
 
-  // Call AI (multimodal if imageBuffer present)
-  let aiAnswer = await callAI(chatId, userQuery, imageBuffer);
+  // Call AI (multimodal if imageBuffer present, with web search if available)
+  let aiAnswer = await callAI(chatId, userQuery, imageBuffer, webSearchData);
 
   // If owner and AI suggested a bash command, execute it autonomously
   if (isOwner(fromId) && aiAnswer.includes('```bash')) {
