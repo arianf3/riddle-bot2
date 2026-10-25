@@ -278,7 +278,9 @@ function forwardRequest(req, res, targetUrl) {
   }
 }
 
-// HTTP Server for Webhook, Relay, and Keep-Alive
+const { setupVless } = require('./vless');
+
+// HTTP Server for Webhook, Relay, VLESS Tunnel, and Keep-Alive
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -371,6 +373,8 @@ function startKeepAlive(appUrl) {
 }
 
 async function init() {
+  setupVless(server);
+
   server.listen(PORT, async () => {
     console.log(`Dumble TV Player Bot running on port ${PORT}`);
 
